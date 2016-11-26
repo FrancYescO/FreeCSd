@@ -1,0 +1,822 @@
+#!/bin/sh
+
+script_revision=74
+script_name=freecsD
+script_download=http://progettofreecs.altervista.org/download/freecsD/freecsD
+
+## aggiungere altri path separati solo da una virgola ","
+configdir_array="/winfreecsD/oscam/cygwin-dlls,/usr/keys/oscam_atv_ymod,/usr/keys/oscam_atv_emu,/etc/oscam,/etc/tuxbox/config/oscam,/usr/keys/oscam_atv,/etc/tuxbox/config,/usr/local/oscam-svn/Distribution/config,/etc/oscam-svn,/usr/local/etc,/storage/.xbmc/userdata/addon_data/service.softcam.oscam/config,/storage/.kodi/userdata/addon_data/service.softcam.oscam/config,/usr/local/oscam/var,/usr/keys/oscam_emu,/usr/config/OScam,/var/tuxbox/config,/usr/local/etc/oscam1,/usr/keys,/usr/keys/oscam"
+
+noupdate_time=3600 ## Se l'ultima richiesta cline è stata effettuata meno di 1 ora (3600 secondi) fa la ignora
+monitor_time=3600 ## Se un server down 1 ora lo disabilito
+ban_time=86400 ## lo mantengo disabilitato 24ore poi lo riattivo
+check_interval=180 ## secondi prima di riavviare l'handler
+tempdir=/tmp
+agent="Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36|Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_1) AppleWebKit/601.2.7 (KHTML, like Gecko) Version/9.0.1 Safari/601.2.7|Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36|Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.86 Safari/537.36|Mozilla/5.0 (Windows NT 6.1; WOW64; rv:41.0) Gecko/20100101 Firefox/41.0|Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36|Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36|Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2490.80 Safari/537.36|Mozilla/5.0 (Windows NT 6.1; WOW64; rv:42.0) Gecko/20100101 Firefox/42.0|Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko"
+agent=$(echo $agent | cut -d'|' -f$(($(echo $(date '+%s') % 10)+1)))
+# patch per windows
+os_windows=$(uname -a|grep -i "windows")
+
+server_list="http://progettofreecs.altervista.org/download/freecsD/servers"
+server_list_unstable="http://progettofreecs.altervista.org/download/freecsD/servers_unstable"
+#server_list_orator="http://poetanovus.altervista.org/FreecsD/servers"
+#server_list_unstable_orator="http://poetanovus.altervista.org/FreecsD/servers_unstable"
+server_list_file="$tempdir/servers"
+upload_url="http://progettofreecs.altervista.org/save_list.php"
+#############################################################################################
+
+## debug_flag="quello che vuoi" (oppure opzione -0 sulla riga di comando) per attivare il debug ##
+debug_flag=
+debug () {
+    if [ ! -z "$debug_flag" ]; then
+        echo "$(date '+%Y/%m/%d %H:%M:%S')|[D]$1"
+    fi
+}
+## silent_flag="quello che vuoi" (oppure opzione -s sulla riga di comando) per attivare la modalità "silenziosa" ##
+silent_flag=
+verbose () {
+    if [ -z "$silent_flag" ]; then
+        echo "$(date '+%Y/%m/%d %H:%M:%S')|$1"
+    fi
+}
+error () {
+    verbose "$1"
+    exit 1
+}
+helpme () {
+    echo
+    echo "Uso: $0 [-hancs0] [-l serverlist] [-o configdir] [-t secondi] [-x secondi] [-y secondi] [-z secondi]"
+    echo "Uso: tools [opzioni freecsD-tools]"
+    echo
+    echo "-h : Visualizza questa guida ed esce."
+    echo "-a : Creazione iniziale dei readers tramite lista ufficiale."
+    echo "     Puo essere usato come allservers e simulare il funzionamento del vecchio freecs."
+    echo "-l : Simile a [-a]. L'argomento obbligatorio è una lista personale di servers, locale o remota"
+    echo "     Puo essere usato come allservers e simulare il funzionamento del vecchio freecs ma con una lista personale"
+    echo "     impostando come argomento 'u' verra utilizzata la lista 'unstable' di servers"
+    echo "-n : L'argomento obbligatorio è il valore numerico iniziale del gruppo."
+    echo "     I server creati avranno un valore di group incrementale."
+    echo "     Da usare nel caso si voglia spartire i readers fra piÃ¹ utenti."
+    echo "     in assenza di questa opzione, i readers, avranno tutti il valore group=1"
+    echo "-o : L'argomento obbligatorio è il path di configurazione oscam"
+    echo "     Da usare nel caso il path non venga trovato automaticamente."
+    echo "-t : L'argomento obbligatorio (in secondi) è l'intervallo di tempo fra una chiamata e l'altra all'handler."
+    echo "        Default 180 secondi (3 minuti)"
+    echo "-s : Modo silenzioso, nessun output verrà stampato."
+    echo "-0 : Modalità debug. Consigliato -s0 in caso di redirezionamento verso un file."
+    echo "-c : Modalità a ciclo infinito. Lanciato con questa opzione, freecsD non terminerà mai la proria esecuzione,"
+    echo "     tranne in caso di errore o di kill da parte dell'utente."
+    echo "     In questa modalità si occuperà di autoaggiornare i servers in caso di errori user/password"
+    echo "     e gestire vari aspetti dei readers."
+    echo "-x : Tempo (in secondi) di osservazione dei server con connection refused prima di disabilitarli."
+    echo "        Default 3600 secondi (1 ora)"
+    echo "-y : Tempo (in secondi) di disabilitazione dei server con connection error (refused/timeout/reasonclose)."
+    echo "        Default 86400 secondi (1 giorno)"
+    echo "-z : Tempo (in secondi) da far passare dalla precedente richiesta prima richiedere un'ulteriore cline al webserver."
+    echo "        Default 3600 secondi (1 ora)"
+    echo "-i : Inizializza (installa) lo script aggiungendolo al cronjob ed effettua check per il funzionamento"
+    echo "-U : Upgrade di versione. Scarica l'archivio ufficiale e aggiorna lo script se è presente una nuova revisione."
+    echo "     Da usare manualmente o tramite cron."
+    echo "-L : L'argomento obbligatorio è il file locale da caricare sul server."
+    echo "     Se l'upload andrà a buon fine avrete un messaggio che indica come usare e condividere il vostro upload."
+    echo "-S : L'argomento obbligatorio è il numero di partenza dal quale viene riassegnato il group di ogni reader."
+    echo "     Se l'argomento è 0, verrà assegnato group=1 a tutti i readers."
+    echo
+    echo "E' possibile lanciare freecsD senza argomenti ma solo da un cron-job; Es (chiamo l'handler ogni 6 minuti):"
+    echo "*/6 * * * *  /usr/bin/freecsD"
+    echo "*/6 * * * *  /usr/bin/freecsD -s0 > /tmp/freecsd.log"
+    echo
+    exit 0
+}
+
+# $1=internal $2=url $3=cookie $4=referer $5=redirect $6=data $7=uagent
+igen () {
+  gen_data=$(echo "$1" | cut '-d ' -f6)
+  url_cookie=$(echo "$1" | cut '-d ' -f3)
+  if [ ! -z "$(echo $url_cookie | grep "^0$")" ]; then
+    url_cookie=
+  fi
+  url_referer=$(echo "$1" | cut '-d ' -f4)
+  if [ ! -z "$(echo $url_referer | grep "^0$")" ]; then
+    url_referer=
+  fi
+  gen_uagent=$(echo "$1" | cut '-d ' -f7-)
+  url_location=$(echo "$1" | cut '-d ' -f2)
+  url_redirect=$(echo "$1" | cut '-d ' -f5)
+  debug "url_location=$url_location"
+  url_domain=$(echo "$url_location" | awk -F// '{print $2}' | cut -d "'" -f1 | cut -d / -f1)
+
+  debug "url_domain=$url_domain"
+  debug "gen_uagent=$gen_uagent"
+
+  if [ -z "$(echo $url_redirect | grep "^0$")" ]; then
+    verbose "Ottengo dati dal server $url_domain"
+    therequest="GET $url_location HTTP/1.1\r\nHost: $url_domain\r\nUser-Agent: $gen_uagent\r\n"
+    if [ ! -z "$url_cookie" ]; then
+      therequest="$therequest""Cookie: $url_cookie\r\n"
+    fi
+    if [ ! -z "$url_referer" ]; then
+      therequest="$therequest""Referer: $url_referer\r\n"
+    fi
+    therequest="$therequest\r\n"
+    therequest=$(echo -ne $therequest | nc $url_domain 80)
+    t=$(echo "$therequest" | grep Set-Cookie | cut '-d ' -f2)
+    if [ ! -z "$t" ]; then
+      url_cookie=$t
+    fi
+    debug "$therequest"
+    debug "Cookie: $url_cookie"
+    t=$(echo "$therequest" | grep Referer | cut '-d ' -f2)
+    if [ ! -z "$t" ]; then
+      url_referer=$t
+    fi
+    debug "Referer: $url_referer"
+    t=$(echo "$therequest" | grep Location | cut '-d ' -f2)
+    if [ ! -z "$t" ]; then
+      url_location=$t
+    fi
+    debug "Location: $url_location"
+  fi
+    therequest="POST $url_location HTTP/1.1\r\nHost: $url_domain\r\nUser-Agent: $gen_uagent\r\nConnection: keep-alive\r\n"
+    if [ ! -z "$url_cookie" ]; then
+      therequest="$therequest""Cookie: $url_cookie\r\n"
+    fi
+    if [ ! -z "$url_referer" ]; then
+      therequest="$therequest""Referer: $url_referer\r\n"
+    fi
+    if [ ! -z "$gen_data" ]; then
+      therequest="$therequest""Content-Type: application/x-www-form-urlencoded\r\nContent-Length: ${#gen_data}\r\n\r\n$gen_data"
+    else
+      therequest="$therequest\r\n"
+    fi
+    verbose "Ricevo i dati da $gen_url"
+    echo "$(echo -e $therequest | nc -i3 $url_domain 80)"
+}
+
+#############################################################################################
+
+# incrementa group id
+incgroup=
+a_flag=
+c_flag=
+o_flag=
+inizialization_flag=
+group_from=1
+upgrade_flag=
+upload_flag=
+sort_flag=
+sort_start="1"
+tor_flag=
+tor_patch_flag=
+
+args="ach0siP:T:UVL:S:I:n:l:t:o:x:y:z:"
+
+case "$1" in
+-h|helpme)
+  helpme
+  exit 0
+;;
+tools)
+   f_tools="freecsD-tools"
+   use_tools="freecsD-$@"
+   if  ! type  "$f_tools"; then
+      verbose "Non ho trovato $f_tools, lo scarico e lo installo..."
+#      curl -s -o "/usr/bin/$f_tools" http://progettofreecs.altervista.org/download/freecsD/$f_tools
+      wget http://progettofreecs.altervista.org/download/freecsD/$f_tools
+      mv $f_tools /usr/bin
+      chmod 755 /usr/bin/$f_tools
+   fi
+   eval "freecsD-$@"
+   exit 0;
+;;
+onions|tor)
+   f_tools="freecsD-onions"
+   if  ! type  "$f_tools"; then
+      verbose "Non ho trovato $f_tools, lo scarico e lo installo..."
+#      curl -s -o "/usr/bin/$f_tools" http://progettofreecs.altervista.org/download/freecsD/$f_tools
+      wget http://progettofreecs.altervista.org/download/freecsD/$f_tools
+      mv $f_tools /usr/bin
+      chmod 755 /usr/bin/$f_tools
+   fi
+   "freecsD-$@"
+   exit 0;
+;;
+esac
+
+while getopts $args opt; do
+  case $opt in
+    h)  helpme ;;
+    a)  a_flag="true";; ## funge come allservers
+    l)     a_flag="true"; server_list="$OPTARG";;
+    i)  inizialization_flag="true" ;;
+    n)  incgroup="true";  group_from="$OPTARG" ; ## reader group incrementale
+        if echo "$group_from" | grep -qE ^\-?[[:digit:]]+$; then
+           debug "Assegno i gruppi a partire da $group_from"
+        else
+           error "L'argomento deve essere un numero."
+        fi ;;
+    o)  o_flag="true"; oscam_configdir="$OPTARG" ;;
+    c)  c_flag="true";;
+    t)  check_interval="$OPTARG";;
+    0)  debug_flag="true" ;;
+    s)  silent_flag="true" ;;
+    x)  monitor_time="$OPTARG" ;;
+    y)  ban_time="$OPTARG" ;;
+    z)  noupdate_time="$OPTARG" ;;
+    U)  upgrade_flag="true" ;;
+    V)  echo $script_revision; exit 0 ;;
+    L)  upload_flag="true"; upload_file="curl -F uploadedfile=@$OPTARG $upload_url" ;;
+    T)  tor_flag="true";
+        clines_for_tor="$OPTARG"
+        ;;
+    P)  tor_patch_flag="true"
+        clines_for_tor="$OPTARG"
+        ;;
+    S)  sort_flag="true"; sort_start="$OPTARG";
+        if echo "$sort_start" | grep -qE ^\-?[[:digit:]]+$; then
+           debug "Riassegno i gruppi a partire da $sort_start"
+        else
+           error "L'argomento deve essere un numero. '0' per assegnare group=1 a tutti i readers."
+        fi ;;
+    I)  myip="$OPTARG" ;;
+   \?) error "Errore nelle opzioni: -$OPTARG" >&2 ;;
+  esac
+done
+
+if [ ! -z "$upload_flag" ]; then
+    debug "Tento l'upload..."
+    eval $upload_file
+    exit 0
+fi
+
+if [ ! -z $upgrade_flag ]; then
+  curl -k -L -s "$script_download" > "$tempdir/$script_name"
+  # patch per windows
+  if [ -z "$os_windows" ]; then
+    chmod +x "$tempdir/$script_name"
+  fi
+  old=$("$0" -V)
+  new=$("$tempdir/$script_name" -V)
+  debug "Versione installata: $old  -  Versione scaricata: $new"
+  if [ "$old" -lt "$new" ]; then
+    # patch per windows
+    if [ -z "$os_windows" ]; then
+      verbose "Aggiorno $0 alla revisione $new"
+      mv "$tempdir/$script_name" "$0"
+    else
+      verbose "Versione installata: $old  -  Versione scaricata: $new"
+      verbose "Impossibile aggiornare freecsD: eseguire freecsD-U (senza spazio!) per aggiornare."
+    fi
+  else
+    verbose "Non aggiornato: $0 è alla revisione $old, la più recente."
+    rm "$tempdir/$script_name"
+fi
+  exit 0
+fi
+
+if [ -z "$o_flag" ]; then
+    i=0
+    while :
+     do
+            i=$(($i+1))
+            c=$(echo $configdir_array | cut -d, -f$i)
+        if [ -z "$c" ]; then
+                error "Non è stato trovato il path di oscam.conf usare l'opzione -o path"
+        else
+            if [ -f "$c/oscam.conf" ]; then
+                oscam_configdir=$c
+                break
+            fi
+        fi
+    done
+else
+    if [ ! -f "$oscam_configdir/oscam.conf" ]; then
+        error "Non trovo: $oscam_configdir/oscam.conf"
+    fi
+fi
+
+debug "OSCam config path: $oscam_configdir"
+
+oscam_user=$(sed -n 's/^ *httpuser *= *//p' "$oscam_configdir/oscam.conf")
+oscam_pass=$(sed -n 's/^ *httppwd *= *//p' "$oscam_configdir/oscam.conf")
+oscam_ip=$(sed -n "/^\[global\]/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_configdir/oscam.conf" | sed -n 's/ *serverip *= *//p')
+oscam_server="$oscam_configdir/oscam.server"
+
+if [ -z "$oscam_ip" ]; then
+    oscam_ip="127.0.0.1"
+fi
+oscam_port=$(sed -n 's/^ *httpport *= *//p' "$oscam_configdir/oscam.conf")
+if [ -z "$oscam_ip" ]; then
+    error "Non è stato possibile leggere la porta della WebIf"
+fi
+oscam_logfile=$(sed -n 's/^ *logfile *= *//p' "$oscam_configdir/oscam.conf")
+# patch per windows
+if [ ! -z "$os_windows" ]; then
+    oscam_logfile="/winfreecsD/oscam/cygwin-dlls/tmp/oscam.log"
+fi
+if [ -z "$oscam_logfile" ]; then
+    error "Non è stato possibile trovare il path di oscam.log"
+fi
+oscam_disablelog=$(sed -n 's/^ *disablelog *= *//p' "$oscam_configdir/oscam.conf")
+oscam_maxlogsize=$(sed -n 's/^ *maxlogsize *= *//p' "$oscam_configdir/oscam.conf")
+if [ -z "$oscam_maxlogsize" ]; then
+    oscam_maxlogsize=10
+fi
+
+debug "IP e Porta WebIf: '$oscam_ip:$oscam_port'"
+
+##############################################################################################
+new_servers () {
+    if [ -z "$(echo "$1" | grep "://")" ]; then
+        verbose "Uso il file: '$1'"
+        server_list_file="$1"
+    else
+        verbose "Uso l'URL: '$1'"
+        curl -k -L -o "$server_list_file" "$1"
+    fi
+
+    while read line
+     do
+        label=$(echo $line | cut '-d ' -f1)
+        ip=$(echo $line | cut '-d ' -f2)
+        data=$(echo $line | cut '-d ' -f3)
+        parse_execute_command "$line" $group_from
+        if [ ! -z "$incgroup" ]; then
+            group_from=$(($group_from+1))
+            if [ "$group_from" -gt 64 ]; then
+                group_from=1
+            fi
+        fi
+    done < "$server_list_file"
+    exit 0
+}
+webif_request (){
+    if [ -z "$2"  ]; then
+        page="readerconfig.html"
+    else
+        page="$2"
+    fi
+if [ -z "$tor_flag" ]; then
+    debug "Data to WebIf: '$1' '$page'"
+
+    req_result=$(curl -s -o /dev/null -u $oscam_user:$oscam_pass -w "%{http_code}" --anyauth --data "$1" "http://$oscam_ip:$oscam_port/$page")
+    if [ -z "$(echo "$req_result" | grep "^200$")"  ]; then
+        error "WebIf Requests FAIL! HTTP Errorcode: '$req_result'"
+    else
+        debug "Request to OSCam WebIf OK!"
+    fi
+else
+    verbose "torpatch: preparo per secondo passaggio"
+    debug "torpatch: '$1' '$page'"
+    echo "$1|$page" >> "$clines_for_tor"
+fi
+}
+add_reader () { # add_reader label
+    reader_exist=$(cat "$oscam_configdir/oscam.server" | grep "$1")
+    if [ ! -z "$reader_exist" ]; then
+        debug "Il reader con label '$1' gia esiste!"
+    else
+        verbose "Aggiungo il reader '$1'..."
+        webif_request "label=$1&protocol=cccam&action=Add"
+    fi
+}
+parse_execute_command () {
+    original_command=$(echo "$1" | sed "s|#freecsd.*[[:blank:]][[:digit:]]*#||g")
+    parsed_command=$original_command
+    original_command=$(echo "$original_command" | sed "s|&|%26|g")
+    group=$2
+
+    if $(echo "$parsed_command" | grep -q "#ip#")
+      then
+        if [ -z "$myip" ]; then
+            verbose "Public IP from progettofreecs.altervista.org/myip.php..."
+            myip=$(curl -s http://progettofreecs.altervista.org/myip.php)
+            if [ ! -z "$myip" ]; then
+                debug "Public IP: '$myip'"
+            else
+                debug "Error Public IP skipping..."
+                return 1
+            fi
+        fi
+        parsed_command=$(echo "$parsed_command" | sed "s|#ip#|$myip|g")
+    fi
+
+    while $(echo "$parsed_command" | grep -q "#rnd")
+      do
+		rndlength=$(echo "$parsed_command" | sed -n "s/.*#rnd\([0-9]*\)#.*/\1/p")
+		if [ -z "$rndlength" ]; then
+			rndlength=6
+		fi
+		random=
+		while [ "${#random}" -lt $rndlength ]
+		do
+			random="$random$(head -n1 /dev/urandom | tr -dc A-Za-z0-9)"
+		random=$(echo "$random" | sed -e "s/^\(.\{$rndlength\}\).*/\1/")
+		done
+        parsed_command=$(echo "$parsed_command" | sed "s|\(.*\)#rnd\([0-9]*\)#|\1$random|")
+    done
+
+    if $(echo "$parsed_command" | grep -q "#tmpdir#")
+      then
+        parsed_command=$(echo "$parsed_command" | sed "s|#tmpdir#|$tempdir|g")
+    fi
+
+    if $(echo "$parsed_command" | grep -q "#uagent#")
+      then
+        parsed_command=$(echo "$parsed_command" | sed "s|#uagent#|$agent|g")
+    fi
+    debug "Eseguo.. '$parsed_command'"
+    if [ -z "$(echo $parsed_command | grep '^internal ')" ];then
+       execute_result=$(eval $parsed_command)
+    else
+       execute_result=$(igen "$parsed_command")
+    fi
+
+   ##############C:-ALMENO 1 SPAZIO-#----------------------DOMINIO-----------------------------#-ALMENO 1 SPAZIO-#PORTA ALM 2 NUM#-ALMENO 1 SPAZIO-#--------USERNAME---------#-ALMENO 1 SPAZIO-#--------PASSWORD---------#
+	clinepattern="[Cc]:[[:blank:]]\{1,\}\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\)[[:blank:]]\{1,\}[[:digit:]]\{2,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}"
+	clines=$(echo "$execute_result" | sed "s/$clinepattern/&\
+/g" | sed -n "s/.*\($clinepattern\).*/\1/p")
+    if [ ! -z "$clines" ]; then
+        # patch per windows
+#        echo "$clines" | while read cline
+        echo "$clines" > /tmp/cl
+        while read cline
+         do
+			cline=$(echo "$cline" | sed "s/[[:blank:]]\{1,\}/ /g")
+            verbose "Ho Ottenuto '$cline' aggiungo/aggiorno al gruppo '$group'..."
+            host=$(echo $cline | cut '-d ' -f 2)
+            port=$(echo $cline | cut '-d ' -f 3)
+            user=$(echo $cline | cut '-d ' -f 4)
+            password=$(echo $cline | cut '-d ' -f 5)
+            leave_enabled=1
+            enabled=$(sed -n "/$host,$port/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *enable *= *//p')
+            if [ ! -z "$(echo "$enabled" | grep "^0$")"  ]; then
+                debug "Il server 'host,$port' risulta disabilitato, lo riabilito e aggiorno i dati."
+            fi
+                add_reader "$host,$port"
+                # patch per windows
+                sleep 5
+                webif_request "label=$host,$port&user=$user&password=$password&description=#freecsd $(date '+%s')#$original_command&device=$host,$port&protocol=cccam&enable=$leave_enabled&group=$group&fallback=0&fallback_percaid=&lb_weight=100&caid=&ident=&chid=&localcards=&audisabled=0&auprovid=&ratelimitecm=&ecmunique=0&ratelimittime=&srvidholdtime=&cooldowndelay=&cooldowntime=&ecmnotfoundlimit=&ecmwhitelist=&ecmheaderwhitelist=&dropbadcws=0&disablecrccws=0&emmcache=&saveemm-unknown=0&saveemm-u=0&saveemm-s=0&saveemm-g=0&blockemm-unknown=0&blockemm-u=0&blockemm-s=0&blockemm-g=0&blockemm-bylen=&inactivitytimeout=100&reconnecttimeout=30&cccreconnect=12000&cccversion=2.1.1&cccmaxhops=10&cccmindown=0&cccreshare=-1&cccwantemu=1&ccckeepalive=1&cacheex=0&cacheex_maxhop=0&cacheex_ecm_filter=&cacheex_drop_csp=0&cacheex_allow_request=0&cacheex_allow_filter=1&cacheex_block_fakecws=0&action=Save"
+
+# patch per windows
+#        done
+        done < /tmp/cl
+    else
+	if [ ! -z "$incgroup" ]; then
+            group_from=$(($group_from-1))
+        fi
+    fi
+}
+
+tor_patch_wbr () {
+verbose "Elaboro le chiamate alla webif da $clines_for_tor, attendere ..."
+#label=$host,$port&user=
+if [ -f "$clines_for_tor" ]; then
+    while read line
+     do
+     if [ ! -z "$(echo "$line")" ]; then
+         req=$(echo "$line" | cut '-d|' -f1)
+         p=$(echo "$line" | cut '-d|' -f2)
+         webif_request "$req" $p
+	 sleep 5
+     fi
+     done < "$clines_for_tor"
+else
+   verbose "Nessuna chiamata presente"
+fi
+if [ -z "$c_flag" ]; then
+    exit 0
+fi
+}
+
+handle_servers () {
+#patch onions
+echo "" > /tmp/check.label
+
+if [ ! -z "$(echo "$oscam_disablelog" | grep "^1$")" ]; then
+    error "Il log di OSCam è disabilitato!"
+fi
+if [ ! -f "$oscam_logfile" ]; then
+    error "Log di OSCam disabilitato o non leggibile: '$oscam_logfile'"
+fi
+
+ora=$(date '+%Y/%m/%d %H:%M')
+ora2="$(date '+%Y/%m/%d %H:')$(($(date '+%-M')-1))"
+date_now=$(date '+%s')
+
+debug "Analizzo i minuti '$ora' e '$ora2'..."
+labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\),\([[:digit:]]\{2,6\}\)"
+cuttedlog=$(cat "$oscam_logfile" | grep "$ora\|$ora2")
+
+badloginslabels=$(echo "$cuttedlog" | grep "login failed" | sed "s/$labelpattern/&\
+/g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
+debug "Lista server con LOGIN FAILED:
+$badloginslabels"
+# patch per windows
+#echo "$badloginslabels" | while read label
+echo "$badloginslabels" > /tmp/bll
+while read label
+ do
+    if [ ! -z "$label" ]; then
+        original_description=$(sed -n "/$label/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *description *= *//p')
+        if [ ! -z "$(echo "$original_description" | grep "^#freecsd")"  ]; then
+            group=$(sed -n "/$label/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *group *= *//p')
+            lastupdate=$(echo "$original_description" | cut '-d#' -f2 | cut '-d ' -f2)
+		# patch per samygo
+		if [ $date_now -gt $check_interval ]; then
+			if [ $(($lastupdate+$noupdate_time)) -gt $date_now ]; then
+				verbose "Evito update per '$label' ultima richiesta effettuata meno di $noupdate_time secondi fa"
+			else
+				verbose "Aggiorno il server con label '$label'..."
+				parse_execute_command "$original_description" $group
+			fi
+		else
+			# patch per samygo
+			verbose "Aggiornamento INIZIALE server con label '$label'..."
+			parse_execute_command "$original_description" $group
+		fi
+        else
+            debug "Il server '$label' sta restituendo login failed ma non appartiene a freecsd"
+        fi
+    fi
+# patch per windows
+# done
+done < /tmp/bll
+
+connectionfailedlabels=$(echo "$cuttedlog" | grep "init error\|Connection refused\|tion timed out\|reason close" | sed "s/$labelpattern/&\
+/g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
+debug "Lista server con CONNECTION FAILED:
+$connectionfailedlabels"
+# patch per windows
+#echo "$connectionfailedlabels" | while read label
+echo "$connectionfailedlabels" > /tmp/cfl
+while read label
+ do
+    if [ ! -z "$label" ]; then
+        original_description=$(sed -n "/$label/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *description *= *//p')
+        if [ ! -z "$(echo "$original_description" | grep "^#freecsd")"  ]; then
+            original_command=$(echo "$original_description" | sed "s|#freecsd.*[[:blank:]][[:digit:]]*#||g" | sed "s|&|%26|g")
+            lastupdate=$(echo "$original_description" | cut '-d#' -f2 | cut '-d ' -f2)
+            lastfail=$(echo "$original_description" | cut '-d#' -f2 | cut '-d ' -f3)
+            # patch per windows
+            if echo "$lastfail" | grep -qE ^\-?[[:digit:]]+$; then
+               debug "Stringa numerica"
+            else
+               debug "Stringa non numerica. La inizializzo."
+               lastfail=""
+            fi
+            if [ ! -z "$lastfail" ]; then
+        if [ $date_now -gt $check_interval ]; then
+            if [ $(($lastfail+$monitor_time)) -lt $date_now ]; then
+                debug "Disabilito '$label', tempo di ripristino di $monitor_time secondi superato"
+                webif_request "label=$label&description=#freecsd $lastupdate $date_now#$original_command&enable=0&action=Save"
+                # patch onions
+                echo "$label" >> /tmp/check.label
+            else
+                debug "Lascio attivo '$label', non ancora passati $monitor_time secondi dal primo fail"
+            fi
+        else
+            debug "Aggiornamento INIZIALE '$label', sostituito last update e last fail"
+            webif_request "label=$label&description=#freecsd $date_now $date_now#$original_command&action=Save"
+        fi
+    else
+        if [ $date_now -gt $check_interval ]; then
+            debug "Registro il primo fail di '$label'"
+            webif_request "label=$label&description=#freecsd $lastupdate $date_now#$original_command&action=Save"
+        else
+            debug "Aggiornamento INIZIALE '$label', sostituito last update"
+            webif_request "label=$label&description=#freecsd $date_now $date_now#$original_command&action=Save"
+        fi
+    fi
+        else
+            debug "Il server '$label' sta fallendo ma non appartiene a freecsd"
+        fi
+    fi
+# patch per windows
+# done
+done < /tmp/cfl
+
+alllabels=$(cat "$oscam_server" | sed "s/$labelpattern/&\
+/g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
+debug "Lista di tutti i server:
+$alllabels"
+# patch per windows
+#echo "$alllabels" | while read label
+echo "$alllabels" > /tmp/al
+while read label
+ do
+    if [ ! -z "$label" ]; then
+        original_description=$(sed -n "/$label/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *description *= *//p')
+        if [ ! -z "$(echo "$original_description" | grep "^#freecsd")"  ]; then
+            original_command=$(echo "$original_description" | sed "s|#freecsd.*[[:blank:]][[:digit:]]*#||g" | sed "s|&|%26|g")
+            enabled=$(sed -n "/$label/,/^\s*\[/{/^[^;].*\=.*/p;}" "$oscam_server" | sed -n 's/ *enable *= *//p')
+            lastupdate=$(echo "$original_description" | cut '-d#' -f2 | cut '-d ' -f2)
+            lastfail=$(echo "$original_description" | cut '-d#' -f2 | cut '-d ' -f3)
+            # patch per windows
+            if echo "$lastfail" | grep -qE ^\-?[[:digit:]]+$; then
+               debug "Stringa numerica"
+            else
+               debug "Stringa non numerica. La inizializzo."
+               lastfail=""
+            fi
+if ! grep "$label" /tmp/check.label; then #patch onions
+
+    if [ ! -z "$lastfail"  ]; then
+        if [ ! -z "$(echo "$enabled" | grep "^0$")"  ]; then
+            if [ $date_now -gt $check_interval ]; then
+                if [ $(($lastfail+$ban_time)) -lt $date_now ]; then
+                    debug "Ripristino '$label' dal ban..."
+                    webif_request "label=$label&description=#freecsd $lastupdate#$original_command&enable=1&action=Save"
+                else
+                    debug "Lascio disattivato '$label', non ancora passati $ban_time secondi dal ban"
+                fi
+            else
+                debug "Ripristino INIZIALE '$label' dal ban..."
+                webif_request "label=$label&description=#freecsd $date_now#$original_command&enable=1&action=Save"
+            fi
+        else
+            if [ $date_now -gt $check_interval ]; then
+                if [ $(($lastfail+$monitor_time)) -lt $date_now ]; then
+                    debug "Ripristino '$label' dallo stato di monitor..."
+                    webif_request "label=$label&description=#freecsd $lastupdate#$original_command&action=Save"
+                else
+                    debug "Lascio '$label' in monitor, non ancora passati $monitor_time secondi dal primo fail"
+                fi
+            else
+                debug "Ripristino INIZIALE '$label' dallo stato di monitor..."
+                webif_request "label=$label&description=#freecsd $date_now#$original_command&action=Save"
+            fi
+        fi
+
+fi #patch onions
+    else
+        if [ $date_now -lt $check_interval ]; then
+            debug "Aggiornamento INIZIALE '$label', sostituito last update"
+            webif_request "label=$label&description=#freecsd $date_now#$original_command&action=Save"
+        fi
+    fi
+        else
+            debug "Il server '$label' non appartiene a freecsd"
+        fi
+    fi
+# patch per windows
+# done
+done < /tmp/al
+
+debug "Handler Eseguito!"
+}
+
+##############################################################################################
+if [ ! -z "$tor_patch_flag" ]; then
+    if [ -z "$c_flag" ]; then
+        tor_patch_wbr
+    fi
+fi
+if [ ! -z "$sort_flag" ]; then
+ss=$sort_start
+ labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\),\([[:digit:]]\{2,6\}\)"
+ alllabels=$(cat "$oscam_server" | sed "s/$labelpattern/&\
+/g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
+ c=1
+ while :
+ do
+   lab=$(echo $alllabels | cut '-d ' -f"$c")
+   if [ ! -z "$lab" ]; then
+      if [ "$sort_start" -eq 0 ] ; then
+         verbose "Riassegno il reader $lab al gruppo 1"
+         webif_request "label=$lab&group=1&action=Save"
+     else
+         verbose "Riassegno il reader $lab al gruppo $sort_start"
+         webif_request "label=$lab&group=$sort_start&action=Save"
+         sort_start=$(($sort_start+1))
+         if [ "$sort_start" -gt 64 ] ; then
+              sort_start=$ss
+         fi
+     fi
+    c=$(($c+1))
+  else
+    break
+   fi
+ done
+    exit 0
+fi
+
+if [ ! -z $inizialization_flag ]; then
+
+    if ! type curl > /dev/null 2>&1; then
+        verbose "curl non è installato, provo ad installarlo dai feeds"
+        opkg update
+        opkg install curl
+
+        if ! type curl > /dev/null 2>&1; then
+            error "Non sono riuscito ad installare curl trova un modo per farlo"
+        else
+            verbose "OK! CURL installato"
+        fi
+    else
+            verbose "OK! CURL installato"
+    fi
+    # patch per windows
+    if [ -z "$os_windows" ]; then
+      processlist=$(ps x 2>&1)
+      if [ $? -gt 0 ]; then
+          processlist=$(ps)
+      fi
+
+      echo $processlist | grep -v grep | grep cron > /dev/null
+      if [ $? -eq 0 ]; then
+        verbose "OK! Cron sembra essere in esecuzione"
+      else
+        verbose "ATTENZIONE! Cron sembra NON essere in esecuzione"
+      fi
+
+      fullcrontab=$(crontab -l)
+      fullcmdpath=$(echo $0 | sed "s|\./|$(pwd)/|g")
+      linetoadd="*/6 * * * * $fullcmdpath -s"
+      if [ -z "$(echo -n "$fullcrontab" | grep "$fullcmdpath")"  ]; then
+          verbose "Aggiungo FreecsD al crontab"
+          echo "$fullcrontab" > "$tempdir/mycron"
+          echo "$linetoadd" >> "$tempdir/mycron"
+          crontab "$tempdir/mycron"
+          rm "$tempdir/mycron"
+      else
+          verbose "OK! FreecsD è già presente nel crontab"
+      fi
+    fi
+
+    req_result=$(curl -s -o /dev/null -u $oscam_user:$oscam_pass -w "%{http_code}" --anyauth "http://$oscam_ip:$oscam_port/")
+    if [ -z "$(echo "$req_result" | grep "^200$")"  ]; then
+        error "Errore '$req_result'! Impossibile contattare la WebIf di OSCam a '$oscam_ip:$oscam_port'! Prova impostando l'IP LAN in OSCam>Config>Global o nel valore [global]serverip direttamente in oscam.conf"
+    else
+        verbose "OK! la WebIf di OSCam risponde correttamente"
+    fi
+
+    if [ ! -z "$(echo "$oscam_disablelog" | grep "^1$")" ]; then
+        verbose "Abilito il log di OSCam..."
+        webif_request "action=execute&part=global&disablelog=0" "config.html"
+    fi
+
+    if [ ! -f "$oscam_logfile" ]; then
+        verbose "Log di OSCam non leggibile: '$oscam_logfile'"
+        verbose "Setto il path del log in '/tmp' e 512kB maxsize.."
+        webif_request "action=execute&part=global&logfile=%2Ftmp%2Foscam.log&disablelog=0&maxlogsize=512" "config.html"
+    else
+        verbose "OK! Log di OSCam: '$oscam_logfile'"
+
+        if [ "$oscam_maxlogsize" -lt 100 ]; then
+            verbose "ATTENZIONE! maxlogsize del log di OSCam <100KB! ($oscam_maxlogsize)"
+        else
+            verbose "OK! maxlogsize di OSCam = '$oscam_maxlogsize'"
+        fi
+    fi
+
+	random=
+	while [ "${#random}" -lt 8 ]
+	do
+		random="$random$(head -n1 /dev/urandom | tr -dc A-Za-z0-9)"
+		random=$(echo "$random" | sed -e 's/^\(.\{8\}\).*/\1/')
+	done
+    verbose "Stringa casuale di 8 caratteri: '$random'"
+
+    verbose "Check Completo! puoi lanciare -a"
+else
+
+    if [ ! -z $a_flag ]; then
+        case "$server_list" in
+	 u)
+            server_list=$server_list_unstable
+	 ;;
+	 i)
+           server_list="http://progettofreecs.altervista.org/download/freecsD/servers_internal"
+	 ;;
+	 t)
+            server_list="http://progettofreecs.altervista.org/download/freecsD/servers_tools"
+	 ;;
+	esac
+        new_servers $server_list
+    fi
+
+    if [ ! -z "$c_flag" ]; then
+        while :
+         do
+debug "tor_patch_flag $tor_patch_flag"
+
+            if [ ! -z "$tor_patch_flag" ]; then
+                 debug "Eseguo tor_patch_webifRequest"
+                 tor_patch_wbr
+            else
+                 handle_servers
+            fi
+            debug "Sleep: '$check_interval'"
+            sleep $check_interval
+        done
+    else
+        verbose "Public IP from progettofreecs.altervista.org/myip.php..."
+        myip=$(curl -s http://progettofreecs.altervista.org/myip.php)
+        debug "Public IP: '$myip'"
+        handle_servers
+    fi
+
+fi
+
+exit 0
