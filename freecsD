@@ -1,6 +1,6 @@
 #!/bin/sh
 
-script_revision=74
+script_revision=75
 script_name=freecsD
 script_download=http://progettofreecs.altervista.org/download/freecsD/freecsD
 
@@ -433,7 +433,7 @@ parse_execute_command () {
     fi
 
    ##############C:-ALMENO 1 SPAZIO-#----------------------DOMINIO-----------------------------#-ALMENO 1 SPAZIO-#PORTA ALM 2 NUM#-ALMENO 1 SPAZIO-#--------USERNAME---------#-ALMENO 1 SPAZIO-#--------PASSWORD---------#
-	clinepattern="[Cc]:[[:blank:]]\{1,\}\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\)[[:blank:]]\{1,\}[[:digit:]]\{2,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}"
+	clinepattern="[Cc]:[[:blank:]]\{1,\}\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alnum:]]\{1,6\}\)[[:blank:]]\{1,\}[[:digit:]]\{2,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}"
 	clines=$(echo "$execute_result" | sed "s/$clinepattern/&\
 /g" | sed -n "s/.*\($clinepattern\).*/\1/p")
     if [ ! -z "$clines" ]; then
