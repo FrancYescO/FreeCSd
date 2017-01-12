@@ -1,6 +1,6 @@
 #!/bin/sh
 
-script_revision=65
+script_revision=67
 script_name=freecsD.unstable
 script_download=http://progettofreecs.altervista.org/download/freecsD/freecsD.unstable
 
@@ -343,10 +343,10 @@ parse_execute_command () {
         parsed_command=$(echo "$parsed_command" | sed "s|#uagent#|$agent|g")
     fi
     debug "Eseguo.. '$parsed_command'"
-    execute_result=$($parsed_command)
+    execute_result=$(eval $parsed_command)
 
    ##############C:-ALMENO 1 SPAZIO-#----------------------DOMINIO-----------------------------#-ALMENO 1 SPAZIO-#PORTA ALM 2 NUM#-ALMENO 1 SPAZIO-#--------USERNAME---------#-ALMENO 1 SPAZIO-#--------PASSWORD---------#
-	clinepattern="[Cc]:[[:blank:]]\{1,\}\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\)[[:blank:]]\{1,\}[[:digit:]]\{2,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}"
+	clinepattern="[Cc]:[[:blank:]]\{1,\}\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alnum:]]\{1,6\}\)[[:blank:]]\{1,\}[[:digit:]]\{2,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}[[:blank:]]\{1,\}\([[:alnum:]][-.,/]*\)\{1,\}"
 	clines=$(echo "$execute_result" | sed "s/$clinepattern/&\
 /g" | sed -n "s/.*\($clinepattern\).*/\1/p")
     if [ ! -z "$clines" ]; then
@@ -412,7 +412,7 @@ ora2="$(date '+%Y/%m/%d %H:')$(($(date '+%-M')-1))"
 date_now=$(date '+%s')
 
 debug "Analizzo i minuti '$ora' e '$ora2'..."
-labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\),\([[:digit:]]\{2,6\}\)"
+labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alnum:]]\{1,6\}\),\([[:digit:]]\{2,6\}\)"
 cuttedlog=$(cat "$oscam_logfile" | grep "$ora\|$ora2")
 
 badloginslabels=$(echo "$cuttedlog" | grep "login failed" | sed "s/$labelpattern/&\
@@ -546,7 +546,7 @@ if [ ! -z "$tor_patch_flag" ]; then
 fi
 if [ ! -z "$sort_flag" ]; then
 ss=$sort_start
- labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alpha:]]\{2,6\}\),\([[:digit:]]\{2,6\}\)"
+ labelpattern="[[:blank:]]\([[:alnum:]][-.]*\)*\([[:alnum:]]\)*.\([[:alnum:]]\{1,6\}\),\([[:digit:]]\{2,6\}\)"
  alllabels=$(cat "$oscam_server" | sed "s/$labelpattern/&\
 /g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
  c=1
