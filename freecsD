@@ -1,11 +1,11 @@
 #!/bin/sh
 
-script_revision=75
+script_revision=80
 script_name=freecsD
 script_download=http://progettofreecs.altervista.org/download/freecsD/freecsD
 
 ## aggiungere altri path separati solo da una virgola ","
-configdir_array="/winfreecsD/oscam/cygwin-dlls,/usr/keys/oscam_atv_ymod,/usr/keys/oscam_atv_emu,/etc/oscam,/etc/tuxbox/config/oscam,/usr/keys/oscam_atv,/etc/tuxbox/config,/usr/local/oscam-svn/Distribution/config,/etc/oscam-svn,/usr/local/etc,/storage/.xbmc/userdata/addon_data/service.softcam.oscam/config,/storage/.kodi/userdata/addon_data/service.softcam.oscam/config,/usr/local/oscam/var,/usr/keys/oscam_emu,/usr/config/OScam,/var/tuxbox/config,/usr/local/etc/oscam1,/usr/keys,/usr/keys/oscam"
+configdir_array="/mnt/opt/privateer/usr/bin/oscam,/mtd_rwcommon/oscam,/opt/storage/usb/sda1/SamyGO/oscam,/opt/storage/usb/sda2/SamyGO/oscam,/opt/storage/usb/sdb1/SamyGO/oscam,/opt/storage/usb/sdb2/SamyGO/oscam,/etc/oscam-freecsmod,/data/local/freecs,/winfreecsD/oscam/cygwin-dlls,/usr/keys/oscam_atv_ymod,/usr/keys/oscam_atv_emu,/etc/oscam,/etc/tuxbox/config/oscam,/usr/keys/oscam_atv,/etc/tuxbox/config,/usr/local/oscam-svn/Distribution/config,/etc/oscam-svn,/usr/local/etc,/storage/.xbmc/userdata/addon_data/service.softcam.oscam/config,/storage/.kodi/userdata/addon_data/service.softcam.oscam/config,/usr/local/oscam/var,/usr/keys/oscam_emu,/usr/config/OScam,/var/tuxbox/config,/usr/local/etc/oscam1,/usr/keys,/usr/keys/oscam,/opt/OsCAM/etc"
 
 noupdate_time=3600 ## Se l'ultima richiesta cline è stata effettuata meno di 1 ora (3600 secondi) fa la ignora
 monitor_time=3600 ## Se un server down 1 ora lo disabilito
@@ -439,7 +439,8 @@ parse_execute_command () {
     if [ ! -z "$clines" ]; then
         # patch per windows
 #        echo "$clines" | while read cline
-        echo "$clines" > /tmp/cl
+        file_cl="/tmp/cl-$(date '+%s')"
+        echo "$clines" > $file_cl
         while read cline
          do
 			cline=$(echo "$cline" | sed "s/[[:blank:]]\{1,\}/ /g")
@@ -460,7 +461,10 @@ parse_execute_command () {
 
 # patch per windows
 #        done
-        done < /tmp/cl
+        done < $file_cl
+        if [ -f "$file_cl" ]; then
+         rm $file_cl
+        fi
     else
 	if [ ! -z "$incgroup" ]; then
             group_from=$(($group_from-1))
@@ -491,7 +495,8 @@ fi
 
 handle_servers () {
 #patch onions
-echo "" > /tmp/check.label
+check_labels="/tmp/checklabels-$(date '+%s')"
+echo "" > $check_labels
 
 if [ ! -z "$(echo "$oscam_disablelog" | grep "^1$")" ]; then
     error "Il log di OSCam è disabilitato!"
@@ -514,7 +519,8 @@ debug "Lista server con LOGIN FAILED:
 $badloginslabels"
 # patch per windows
 #echo "$badloginslabels" | while read label
-echo "$badloginslabels" > /tmp/bll
+file_bll="/tmp/bll-$(date '+%s')"
+echo "$badloginslabels" > $file_bll
 while read label
  do
     if [ ! -z "$label" ]; then
@@ -541,7 +547,10 @@ while read label
     fi
 # patch per windows
 # done
-done < /tmp/bll
+done < $file_bll
+if [ -f "$file_bll" ]; then
+  rm $file_bll
+fi
 
 connectionfailedlabels=$(echo "$cuttedlog" | grep "init error\|Connection refused\|tion timed out\|reason close" | sed "s/$labelpattern/&\
 /g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
@@ -549,7 +558,8 @@ debug "Lista server con CONNECTION FAILED:
 $connectionfailedlabels"
 # patch per windows
 #echo "$connectionfailedlabels" | while read label
-echo "$connectionfailedlabels" > /tmp/cfl
+file_cfl="/tmp/cfl-$(date '+%s')"
+echo "$connectionfailedlabels" > $file_cfl
 while read label
  do
     if [ ! -z "$label" ]; then
@@ -571,7 +581,7 @@ while read label
                 debug "Disabilito '$label', tempo di ripristino di $monitor_time secondi superato"
                 webif_request "label=$label&description=#freecsd $lastupdate $date_now#$original_command&enable=0&action=Save"
                 # patch onions
-                echo "$label" >> /tmp/check.label
+                echo "$label" >> $check_labels
             else
                 debug "Lascio attivo '$label', non ancora passati $monitor_time secondi dal primo fail"
             fi
@@ -594,7 +604,10 @@ while read label
     fi
 # patch per windows
 # done
-done < /tmp/cfl
+done < $file_cfl
+if [ -f "$file_cfl" ]; then
+   rm $file_cfl
+fi
 
 alllabels=$(cat "$oscam_server" | sed "s/$labelpattern/&\
 /g" | sed -n "s/.*\($labelpattern\).*/\1/p" | sed "s/[[:blank:]]//g" | awk '!x[$0]++')
@@ -602,7 +615,8 @@ debug "Lista di tutti i server:
 $alllabels"
 # patch per windows
 #echo "$alllabels" | while read label
-echo "$alllabels" > /tmp/al
+file_al="/tmp/al-$(date '+%s')"
+echo "$alllabels" > $file_al
 while read label
  do
     if [ ! -z "$label" ]; then
@@ -619,7 +633,7 @@ while read label
                debug "Stringa non numerica. La inizializzo."
                lastfail=""
             fi
-if ! grep "$label" /tmp/check.label; then #patch onions
+if ! grep "$label" $check_labels; then #patch onions
 
     if [ ! -z "$lastfail"  ]; then
         if [ ! -z "$(echo "$enabled" | grep "^0$")"  ]; then
@@ -661,7 +675,13 @@ fi #patch onions
     fi
 # patch per windows
 # done
-done < /tmp/al
+done < $file_al
+if [ -f "$file_al" ]; then
+  rm $file_al
+fi
+if [ -f "$check_labels" ]; then
+  rm $check_labels
+fi
 
 debug "Handler Eseguito!"
 }
